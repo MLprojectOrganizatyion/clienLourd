@@ -1,39 +1,34 @@
-import os
+try:
+    import pika
+    import json
+    import logging
+    import pika
+    import os
 
-# os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-import os.path
-import re
-import keras
-from os import listdir
-import numpy as np
-import tensorflow.keras as keras
-from PIL import Image
-from sklearn.metrics import confusion_matrix
-import matplotlib.pyplot as plt
-import json
-from keras.models import load_model
-import pickle
+    # os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+    import os.path
+    import re
+    import keras
+    from os import listdir
+    import numpy as np
+    import tensorflow.keras as keras
+    from PIL import Image
+    from sklearn.metrics import confusion_matrix
+    import matplotlib.pyplot as plt
+    import json
+    from keras.models import load_model
+    import pickle
+    import os, shutil
 
+except Exception as e:
+    print("Sone Modules are missings {}".format_map(e))
+
+import pika, os, logging
 
 target_size = (64, 64)
 
 
-# def get_label(path):
-#     label = []
-#     for filename in os.listdir(path):
-#         try:
-#             if re.match(r'traffic_sg_20_', filename):
-#                 label.append(20)
-#             if re.match(r'traffic_sg_30_', filename):
-#                 label.append(30)
-#             if re.match(r'traffic_sg_50_', filename):
-#                 label.append(50)
-#             if re.match(r'traffic_sg_60_', filename):
-#                 label.append(60)
-#         except:
-#             continue
-#     return np.array(label)
 def get_label(path):
     label = []
 
@@ -52,18 +47,6 @@ def get_label(path):
     return np.array(label)
 
 
-# def get_data(path):
-#     train_image = []
-#
-#     for filename in os.listdir(path):
-#         try:
-#             img = image.load_img(path + filename, target_size=(28, 28, 3))
-#             img = image.img_to_array(img)
-#             img = img / 255
-#             train_image.append(img)
-#         except:
-#             continue
-#     return np.array(train_image)
 def get_data(path):
     train_image = []
 
@@ -103,6 +86,7 @@ def y_test():
     # y_test = to_categorical(y_test)
     return y_test
 
+
 def resize_multiple_images(src_path, dst_path):
     # Here src_path is the location where images are saved.
     for filename in listdir(src_path):
@@ -114,6 +98,8 @@ def resize_multiple_images(src_path, dst_path):
             new_img.save(dst_path + filename)
         except:
             continue
+
+
 def validation():
     path = "./validation/"
     path_from = "./loadImages/"
@@ -123,6 +109,30 @@ def validation():
         validation.append(
             np.array(Image.open(f'{path}{img_name}').convert('RGB').resize(target_size)) / 255.0)  # color
     return np.array(validation)
+
+
+def deleteValidationFolder():
+    folder = "./validation/"
+    for the_file in os.listdir(folder):
+        file_path = os.path.join(folder, the_file)
+        try:
+            if os.path.isfile(file_path):
+                os.unlink(file_path)
+            # Elif os.path.isdir(file_path): shutil.rmtree(file_path)
+        except Exception as e:
+            print(e)
+
+
+def deleteLoadImageFolder():
+    folder = "./loadImages/"
+    for the_file in os.listdir(folder):
+        file_path = os.path.join(folder, the_file)
+        try:
+            if os.path.isfile(file_path):
+                os.unlink(file_path)
+            # Elif os.path.isdir(file_path): shutil.rmtree(file_path)
+        except Exception as e:
+            print(e)
 
 
 def create_linear_model():
@@ -251,7 +261,7 @@ def training(m):
         model.fit(x_train(), y_train(), epochs=100, batch_size=4)
         show_confusion_matrix(model, x_test(), y_test())
         model.save("mlp_model.keras")
-        #saveModel(model, 'mlp_mode.pkl')
+        # saveModel(model, 'mlp_mode.pkl')
     if m == 2:
         model = create_conv_nn_model()
         logs = model.fit(x_train(), y_train(), epochs=100, batch_size=4)
@@ -272,16 +282,22 @@ def training(m):
 
 
 def checking(m, picture):
-    if m == 0:
+    if m == "0":
         loaded = keras.models.load_model("linear_model.keras")
-    if m == 1:
+        print("lineare model")
+    if m == "1":
         loaded = keras.models.load_model('mlp_model.keras')
-    if m == 2:
+        print("mlp model")
+    if m == "2":
         loaded = keras.models.load_model("conv_nn_model.keras")
-    if m == 3:
+        print("conv_nn model")
+    if m == "3":
         loaded = keras.models.load_model("residual_nn_model.keras")
-    if m == 4:
+        print("residual_nn model")
+    if m == "4":
         loaded = keras.models.load_model("u_net_model.keras")
+        print("u_net model")
+
     predicted = loaded.predict(picture)
     print("x_validation", predicted)
     for i in range(len(predicted)):  # Loops through each game
@@ -314,15 +330,68 @@ def openModel(filename):
     return pickleModel
 
 
-if __name__ == "__main__":
+logging.basicConfig()
+params = pika.URLParameters('amqp://chfcmcko:Q6-goXluL-7715xQIehznVetJ3RoNtvj@chinook.rmq.cloudamqp.com/chfcmcko')
+params.socket_timeout = 5
+
+connection = pika.BlockingConnection(params)
+channel = connection.channel()
+channel.queue_declare(queue='prediction_queue', durable=True)
+channel.queue_declare(queue='send_model_queue', durable=True)
+
+
+def on_request(ch, method, props, body):
+    body = body.decode("utf-8")
+    body = json.loads(body)
+    id_model = body['id']
+    print("id_game", type(id_model))
+    ### ----------------------------------Treatment--------------------------------- ###
     x_validation = validation()
-    m = 2
     train = 0
 
     if train == 1:
-        training(m)
+        training(id_model)
     if train == 0:
-        checking(m, x_validation)
+        Percent_30, Percent_50, Percent_60 = checking(id_model, x_validation)
+        prevision = {"traffic_30": Percent_30,
+                     "traffic_50": Percent_50,
+                     "traffic_60": Percent_60}
+    print("prevision*************", prevision)
+    deleteValidationFolder()
+    deleteLoadImageFolder()
+    message = json.dumps(prevision)
+    print("message++++++++++++++++", message)
+    ch.basic_publish(exchange='', routing_key='prediction_queue', body=message)
+    ch.basic_ack(delivery_tag=method.delivery_tag)
+    ### ----------------------------------Treatment--------------------------------- ###
+
+
+channel.basic_qos(prefetch_count=1)
+channel.basic_consume(on_message_callback=on_request, queue='send_model_queue')
+
+print(" [x] Awaiting RPC requests")
+channel.start_consuming()
+
+# if __name__ == "__main__":
+#
+#     x_validation = validation()
+#     m = 2
+#     train = 0
+#
+#     if train == 1:
+#         training(m)
+#     if train == 0:
+#         checking(m, x_validation)
+#
+#     deleteValidationFolder()
+#     deleteLoadImageFolder()
+
+
+
+
+
+
+
 
 # # Affichage ddes courbes de loss et d'accuracy de l'apprentissage
 # plt.plot(logs.history['loss'])
